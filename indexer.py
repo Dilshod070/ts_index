@@ -7,6 +7,7 @@ import argparse
 import document_pb2
 import gzip
 from struct import pack, unpack
+from hashlib import md5
 
 import doc2words
 import docreader
@@ -16,13 +17,12 @@ class Indexer():
     """
     Makes, Compresses, and Saves dict
     """
-    def __init__(self, compressor='varbyte', hash_='mmh2', coding='utf8'):
+    def __init__(self, compressor='varbyte', hash_='md5/2', coding='utf8'):
         """
         compressors: ['varbyte', 'simple9']
-        hash_: ['mmh2']
+        hash_: ['mmh2', 'md5/2'] (коллизии при mmh2!!!)
         coding: any (tested only with utf8)
         """
-        
         self.dict = {}
         self.compressed_dict = None
         self.urls = {}
@@ -34,10 +34,16 @@ class Indexer():
             
         self.hash_type = hash_
         if hash_ == 'mmh2': self.hash = MurmurHash2()
+        elif hash_ == 'md5/2': self.hash = self.half_md5
         else: raise RuntimeError('Hash: {} not found'.format(hash_))
             
         self.coding = coding
-     
+    
+    def half_md5(self, data):
+        data = unicode(data).encode(self.coding)
+        return int(md5(data).hexdigest()[:16], 16)
+
+
     def make_dict(self, doc_reader):
         for docID, doc in enumerate(doc_reader):
             url = doc.url # не буду делать DocID <=> doc.url
@@ -45,14 +51,20 @@ class Indexer():
             text = doc.text
             words = doc2words.extract_words(text)
             self.urls[docID] = url
+#             if docID == 21: 
+#                 print doc.url
+#                 print "BODY\n", doc.body
+#                 print "TEXT\n", doc.text
+#                 for word in words:
+#                     if self.hash(word) == self.hash(u'сша'): print word
             for word in words:
-#                 word = unicode(word).encode(self.coding)
                 termID = self.hash(word)
                 if termID in self.dict:
                     if docID not in self.dict[termID]:
                         self.dict[termID] = np.concatenate((self.dict[termID], [docID]))
                 else:
                     self.dict[termID] = np.asarray([docID])
+#         print self.dict[self.hash(u'сша')]
     
     def compress(self):
         if self.compressed_dict is not None:
@@ -63,12 +75,13 @@ class Indexer():
         # Удалить словарь, чтобы не занимал память?
         self.dict = {}
         
-    def save(self, OUTPUT_FILE='index.dat', OUTPUT_FILE2='urls.dat'): # Работает только с mmh2
+    def save(self, OUTPUT_FILE='index.dat', OUTPUT_FILE2='urls.dat'): # Работает только с hash_size <= uint64
         if self.compressed_dict is None:
             raise RuntimeError('Compress dictionaty before saving')
         output = open(OUTPUT_FILE, 'wb')
         output2 = open(OUTPUT_FILE2, 'wb')
         output.write(self.compressor_type + '\n')
+        output.write(self.hash_type + '\n')
         for termID in self.compressed_dict:
             array = self.compressed_dict[termID]
             if self.compressor_type == 'varbyte':
@@ -83,7 +96,7 @@ class Indexer():
         output.close()
         output2.close()
         
-    def read(self, INPUT_FILE='index.dat', INPUT_FILE2='urls.dat'): # Работает только с mmh2
+    def read(self, INPUT_FILE='index.dat', INPUT_FILE2='urls.dat'): # Работает только с hash_size <= uint64
         if self.compressed_dict is not None:
             print >> sys.stderr, 'Dictionary was already read'
         self.compressed_dict = {}
@@ -91,6 +104,7 @@ class Indexer():
         input_file = open(INPUT_FILE, 'rb')
         input_file2 = open(INPUT_FILE2, 'rb')
         self.compressor_type = input_file.readline()[:-1]
+        self.hash_type = input_file.readline()[:-1]
         if self.compressor_type == 'varbyte': self.compressor = Varbyte()
         elif self.compressor_type == 'simple9': self.compressor = Simple9()
         else: raise RuntimeError('Compressor: {} not found'.format(self.compressor_type))

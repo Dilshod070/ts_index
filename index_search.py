@@ -14,7 +14,6 @@ class Searcher():
         pass
     
     def search(self, q):
-        print q
         words = self.tokenize_query(q)
         doclists = []
         for word in words:
@@ -32,10 +31,7 @@ class Searcher():
                 for i in range(1, len(doclists)):
                     if docID not in doclists[i]: flag = False
                 if flag: res.append(docID)
-        print len(res)
-        for i in res:
-            print self.indx.urls[i]
-        pass
+        return res
 
     def tokenize_query(self, q):
         if self.type == 'simple':
@@ -55,5 +51,8 @@ if __name__ == '__main__':
         if not words:
             break
         if words[-1] == '\n': words = words[:-1]
-#         search.search(words.lower())
-        search.search(words.decode('utf8').lower())
+        print words
+        res = search.search(words.decode('utf8').lower())
+        print len(res)
+        for i in res:
+            print search.indx.urls[i]
